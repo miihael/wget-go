@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/laher/wget-go/wget"
+	"github.com/miihael/wget-go/wget"
 )
 
 func main() {
