@@ -1,8 +1,6 @@
-// +build go1.2
-
 package wget
 
-import(
+import (
 	"crypto/tls"
 	"errors"
 	"github.com/laher/uggo"
@@ -27,10 +25,10 @@ func getHttpTransport(options *Wgetter) (*http.Transport, error) {
 	case "":
 		//OK
 	default:
-		return nil, errors.New("unrecognised secure protocol '"+ options.SecureProtocol+"'")
+		return nil, errors.New("unrecognised secure protocol '" + options.SecureProtocol + "'")
 	}
 	tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: options.IsNoCheckCertificate, MinVersion: minSecureProtocol, MaxVersion: maxSecureProtocol}}
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: options.IsNoCheckCertificate, MinVersion: minSecureProtocol, MaxVersion: maxSecureProtocol}}
 	return tr, nil
 
 }
