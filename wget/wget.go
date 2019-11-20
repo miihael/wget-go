@@ -32,24 +32,26 @@ import (
 // timestamping
 // wgetrc
 type Wgetter struct {
-	IsContinue     bool
+	IsContinue bool
+	Spider     bool
 	// should be set explicitly to false when running from CLI. uggo will detect as best as possible
-	AlwaysPipeStdin   bool 
-	OutputFilename string
-	Timeout        int //TODO
-	Retries        int //TODO
-	IsVerbose      bool //todo
-	DefaultPage    string
-	UserAgent      string //todo
-	ProxyUser	string //todo
-	ProxyPassword	string //todo
-	Referer		string //todo
-	SaveHeaders	bool //todo
-	PostData	string //todo
-	HttpUser	string //todo
-	HttpPassword    string //todo
+	AlwaysPipeStdin      bool
+	OutputFilename       string
+	Timeout              int //TODO
+	Retries              int //TODO
+	IsVerbose            bool
+	ShowProgress         bool
+	DefaultPage          string
+	UserAgent            string //todo
+	ProxyUser            string //todo
+	ProxyPassword        string //todo
+	Referer              string //todo
+	SaveHeaders          bool   //todo
+	PostData             string //todo
+	HttpUser             string //todo
+	HttpPassword         string //todo
 	IsNoCheckCertificate bool
-	SecureProtocol string
+	SecureProtocol       string
 
 	links []string
 }
@@ -94,15 +96,22 @@ func WgetCli(call []string) (error, int) {
 func (tail *Wgetter) Name() string {
 	return "wget"
 }
+
 // Parse CLI flags
 func (w *Wgetter) ParseFlags(call []string, errPipe io.Writer) (error, int) {
 
 	flagSet := uggo.NewFlagSetDefault("wget", "[options] URL", VERSION)
 	flagSet.SetOutput(errPipe)
 	flagSet.AliasedBoolVar(&w.IsContinue, []string{"c", "continue"}, false, "continue")
-	flagSet.AliasedStringVar(&w.OutputFilename, []string{"O","output-document"}, "", "specify filename")
+	flagSet.BoolVar(&w.Spider, "spider", false, "Spider")
+	flagSet.AliasedStringVar(&w.OutputFilename, []string{"O", "output-document"}, "", "specify filename")
 	flagSet.StringVar(&w.DefaultPage, "default-page", "index.html", "default page name")
 	flagSet.BoolVar(&w.IsNoCheckCertificate, "no-check-certificate", false, "skip certificate checks")
+	flagSet.AliasedBoolVar(&w.IsVerbose, []string{"v", "verbose"}, false, "be verbose")
+	var q bool
+	flagSet.AliasedBoolVar(&q, []string{"q", "quiet"}, false, "be quiet")
+	var z string
+	flagSet.AliasedStringVar(&z, []string{"n", "no-verbose"}, "", "for compatibility")
 
 	//some features are available in go-1.2+ only
 	extraOptions(flagSet, w)
@@ -110,7 +119,9 @@ func (w *Wgetter) ParseFlags(call []string, errPipe io.Writer) (error, int) {
 	if err != nil {
 		return err, code
 	}
-
+	if q {
+		w.IsVerbose = false
+	}
 	//fmt.Fprintf(errPipe, "%+v\n", w)
 	args := flagSet.Args()
 	if len(args) < 1 {
@@ -144,24 +155,24 @@ func (w *Wgetter) Exec(inPipe io.Reader, outPipe io.Writer, errPipe io.Writer) (
 			}
 		}
 	} else {
-			bio := bufio.NewReader(inPipe)
-			hasMoreInLine := true
-			var err error
-			var line []byte
-			for hasMoreInLine {
-				line, hasMoreInLine, err = bio.ReadLine()
-				if err == nil {
-					//line from stdin
-					err = wgetOne(strings.TrimSpace(string(line)), w, outPipe, errPipe)
+		bio := bufio.NewReader(inPipe)
+		hasMoreInLine := true
+		var err error
+		var line []byte
+		for hasMoreInLine {
+			line, hasMoreInLine, err = bio.ReadLine()
+			if err == nil {
+				//line from stdin
+				err = wgetOne(strings.TrimSpace(string(line)), w, outPipe, errPipe)
 
-					if err != nil {
-						return err, 1
-					}
-				} else {
-					//finish
-					hasMoreInLine = false
+				if err != nil {
+					return err, 1
 				}
+			} else {
+				//finish
+				hasMoreInLine = false
 			}
+		}
 
 	}
 	return nil, 0
@@ -181,7 +192,11 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 		link = "http://" + link
 	}
 	startTime := time.Now()
-	request, err := http.NewRequest("GET", link, nil)
+	method := "GET"
+	if options.Spider {
+		method = "HEAD"
+	}
+	request, err := http.NewRequest(method, link, nil)
 	//resp, err := http.Get(link)
 	if err != nil {
 		return err
@@ -200,7 +215,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 	client := &http.Client{Transport: tr}
 
 	//continue from where we left off ...
-	if options.IsContinue {
+	if options.IsContinue && !options.Spider {
 		if options.OutputFilename == "-" {
 			return errors.New("Continue not supported while piping")
 		}
@@ -268,7 +283,13 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 	}
 
 	typ := resp.Header.Get("Content-Type")
-	fmt.Fprintf(errPipe, "Content-Length: %v Content-Type: %s\n", lenS, typ)
+	if options.IsVerbose {
+		fmt.Fprintf(errPipe, "Content-Length: %v Content-Type: %s\n", lenS, typ)
+	}
+
+	if options.Spider {
+		return nil
+	}
 
 	if filename == "" {
 		filename, err = getFilename(request, resp, options, errPipe)
@@ -325,7 +346,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 			return err
 		}
 		i += 1
-		if length > -1 {
+		if length > -1 && options.IsVerbose {
 			if length < 1 {
 				fmt.Fprintf(errPipe, "\r     [ <=>                                  ] %d\t-.--KB/s eta ?s             ", tot)
 			} else {
@@ -339,7 +360,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 				eta := remKb / spd
 				fmt.Fprintf(errPipe, "\r%3d%% [%s] %d\t%0.2fKB/s eta %0.1fs             ", perc, prog, tot, spd, eta)
 			}
-		} else {
+		} else if options.IsVerbose {
 			//show dots
 			if math.Mod(float64(i), 20) == 0 {
 				fmt.Fprint(errPipe, ".")
@@ -349,15 +370,18 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 	nowTime := time.Now()
 	totTime := nowTime.Sub(startTime)
 	spd := float64(tot/1000) / totTime.Seconds()
-	if length < 1 {
-		fmt.Fprintf(errPipe, "\r     [ <=>                                  ] %d\t-.--KB/s in %0.1fs             ", tot, totTime.Seconds())
-		fmt.Fprintf(errPipe, "\n (%0.2fKB/s) - '%v' saved [%v]\n", spd, filename, tot)
-	} else {
-		perc := (100 * tot) / length
-		prog := progress(perc)
-		fmt.Fprintf(errPipe, "\r%3d%% [%s] %d\t%0.2fKB/s in %0.1fs             ", perc, prog, tot, spd, totTime.Seconds())
-		fmt.Fprintf(errPipe, "\n '%v' saved [%v/%v]\n", filename, tot, length)
+	if options.IsVerbose {
+		if length < 1 {
+			fmt.Fprintf(errPipe, "\r     [ <=>                                  ] %d\t-.--KB/s in %0.1fs             ", tot, totTime.Seconds())
+			fmt.Fprintf(errPipe, "\n (%0.2fKB/s) - '%v' saved [%v]\n", spd, filename, tot)
+		} else {
+			perc := (100 * tot) / length
+			prog := progress(perc)
+			fmt.Fprintf(errPipe, "\r%3d%% [%s] %d\t%0.2fKB/s in %0.1fs             ", perc, prog, tot, spd, totTime.Seconds())
+			fmt.Fprintf(errPipe, "\n '%v' saved [%v/%v]\n", filename, tot, length)
+		}
 	}
+
 	if err != nil {
 		return err
 	}
