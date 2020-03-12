@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/laher/uggo"
 	"io"
 	"math"
 	"mime"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/laher/uggo"
 )
 
 //TODO
@@ -57,8 +58,10 @@ type Wgetter struct {
 }
 
 const (
-	VERSION              = "0.5.0"
-	FILEMODE os.FileMode = 0660
+	VERSION                     = "0.5.0"
+	FILEMODE        os.FileMode = 0660
+	WGET_DISP_DELAY             = int64(100)
+	NANO_TO_MILLI               = int64(1000000) // Magic numbers are bad, mmkay
 )
 
 //Factory for wgetter which outputs to Stdout
@@ -276,7 +279,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 	lenS := resp.Header.Get("Content-Length")
 	length := int64(-1)
 	if lenS != "" {
-		length, err = strconv.ParseInt(lenS, 10, 32)
+		length, err = strconv.ParseInt(lenS, 10, 64)
 		if err != nil {
 			return err
 		}
@@ -329,6 +332,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 	buf := make([]byte, 4068)
 	tot := int64(0)
 	i := 0
+	sinceLast := time.Now()
 
 	for {
 		// read a chunk
@@ -345,11 +349,11 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 		if _, err := out.Write(buf[:n]); err != nil {
 			return err
 		}
-		i += 1
+		i++
 		if length > -1 && options.IsVerbose {
 			if length < 1 {
 				fmt.Fprintf(errPipe, "\r     [ <=>                                  ] %d\t-.--KB/s eta ?s             ", tot)
-			} else {
+			} else if (time.Now().Sub(sinceLast).Nanoseconds() / NANO_TO_MILLI) > WGET_DISP_DELAY {
 				//show percentage
 				perc := (100 * tot) / length
 				prog := progress(perc)
@@ -359,6 +363,7 @@ func wgetOne(link string, options *Wgetter, outPipe io.Writer, errPipe io.Writer
 				remKb := float64(length-tot) / float64(1000)
 				eta := remKb / spd
 				fmt.Fprintf(errPipe, "\r%3d%% [%s] %d\t%0.2fKB/s eta %0.1fs             ", perc, prog, tot, spd, eta)
+				sinceLast = time.Now()
 			}
 		} else if options.IsVerbose {
 			//show dots
